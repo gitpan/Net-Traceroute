@@ -19,7 +19,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.16 2003/02/16 16:38:34 hag Exp $
+# $Id: Traceroute.pm,v 1.17 2003/03/05 21:27:17 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -48,7 +48,7 @@ use Socket;
 use Symbol qw(qualify_to_ref);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.06";		# Version number is only incremented by
+$VERSION = "1.07";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -109,7 +109,6 @@ my @simple_instance_vars = (
 			    qw(
 			       pathmtu
 			       stat
-			       _text_accumulator
 			       ),
 			    @public_instance_vars,
 			    );
