@@ -1,0 +1,24 @@
+I needed to talk to traceroute within some perl scripts, and actually
+use the information within the traceroute.  Nothing hard, nothing
+wierd, just traceroute.  If you don't know what traceroute is, you
+probably don't care about this module.
+
+I have released version 0.9 of Net::Traceroute to CPAN and my home
+page.  My CPAN area is authors/id/H/HA/HAG, and my home page is
+currently http://www.ai.mit.edu/people/hag/ .  I hope you find the
+module useful.
+
+Example:
+
+use Net::Traceroute;
+$tr = Net::Traceroute->new(host=>"life.ai.mit.edu");
+
+if($tr->found) {
+    my $hops = $tr->hops;
+    if($hops == 1) {
+	print "Same subnet\n";
+    } else {
+	print "Last router is " .
+	    $tr->hop_query_host($hops - 1, 1) . "\n";
+    }
+}
