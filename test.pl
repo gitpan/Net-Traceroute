@@ -17,7 +17,7 @@
 # Date:		Sat Oct 17 22:33:40 1998
 # Description:	test stuff for Tree::Radix
 #
-# $Id: test.pl,v 1.1 1999/03/05 20:04:27 hag Exp $
+# $Id: test.pl,v 1.2 1999/11/17 05:19:28 hag Exp $
 
 # Before `make install' is performed this script should be runnable with
 # `make test'. After `make install' it should work as `perl test.pl'
@@ -41,11 +41,17 @@ print "ok 1\n";
 my $tr = new Net::Traceroute() || do { print "not ok 2\n" ; exit 1};
 print "ok 2\n";
 
-# Test 3: traceroute to localhost
-my $self_tr = $tr->new(host => "localhost") ||
-    do { print "not ok 3\n" ; exit 1};
+# Test 3: traceroute to self.  localhost doesn't work on some OSes.
 
-if($self_tr->stat != TRACEROUTE_OK || $self_tr->hops != 1) {
+my $uname = `uname -n`;		# XXX Sys::Hostname ?
+chomp $uname;
+
+my $self_tr = $tr->new(host => $uname, timeout=>30,
+#		       debug => 9,
+		       ) || do { print "not ok 3\n" ; exit 1};
+
+if($self_tr->stat != TRACEROUTE_OK || ! $self_tr->found ||
+   $self_tr->hops != 1) {
     print "not ok 3\n";
     exit 1;
 }

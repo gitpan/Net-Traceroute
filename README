@@ -3,10 +3,17 @@ use the information within the traceroute.  Nothing hard, nothing
 wierd, just traceroute.  If you don't know what traceroute is, you
 probably don't care about this module.
 
-I have released version 0.9 of Net::Traceroute to CPAN and my home
+I have released version 1.0 of Net::Traceroute to CPAN and my home
 page.  My CPAN area is authors/id/H/HA/HAG, and my home page is
-currently http://www.ai.mit.edu/people/hag/ .  I hope you find the
+currently http://www.linnaean.org/~hag/ .  I hope you find the
 module useful.
+
+This traceroute module works by parsing your vendor's traceroute
+command.  As such, some systems may not work; Windows is known not to.
+Patches to support your favorite OS are welcome.
+
+Daniel Hagerty
+hag@linnaean.org
 
 Example:
 

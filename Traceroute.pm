@@ -18,7 +18,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.3 1999/04/02 12:47:57 hag Exp $
+# $Id: Traceroute.pm,v 1.4 1999/11/17 05:20:07 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -44,8 +44,9 @@ use Exporter;
 use IO::Pipe;
 use IO::Select;
 use Net::Inet;
+use Data::Dumper;		# Debugging
 
-$VERSION = "0.9";		# Version number is only incremented by
+$VERSION = "1.00";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -84,6 +85,7 @@ sub TRACEROUTE_UNREACH_FILTER_PROHIB { 9 }
 # Instance variables that are nothing special, and have an obvious
 # corresponding accessor/mutator method.
 my @simple_instance_vars = qw(base_port
+			      debug
 			      host
 			      max_ttl
 			      queries
@@ -128,12 +130,16 @@ sub new {
 	}
     }
 
+    $me->debug_print(1, "Running in debug mode\n");
+
     # Initialize status
     $me->stat(TRACEROUTE_UNKNOWN);
 
     if(defined($me->host)) {
 	$me->traceroute;
     }
+
+    $me->debug_print(9, Dumper($me));
 
     $me;
 }
@@ -146,6 +152,8 @@ sub new {
 sub traceroute {
     my $self = shift;
     my $host = shift || $self->host();
+
+    $self->debug_print(1, "Performing traceroute\n");
 
     die "No host provided!" unless $host;
 
@@ -208,6 +216,15 @@ sub traceroute {
 sub base_port {
     my $self = shift;
     my $elem = "base_port";
+
+    my $old = $self->{$elem};
+    $self->{$elem} = $_[0] if @_;
+    return $old;
+}
+
+sub debug {
+    my $self = shift;
+    my $elem = "debug";
 
     my $old = $self->{$elem};
     $self->{$elem} = $_[0] if @_;
@@ -281,7 +298,11 @@ sub stat {
 sub hops {
     my $self = shift;
 
-    int(@{$self->{"hops"}});
+    my $hop_ary = $self->{"hops"};
+
+    return() unless $hop_ary;
+
+    return(int(@{$hop_ary}));
 }
 
 sub hop_queries {
@@ -398,9 +419,13 @@ sub _parse {
   ttl:
     foreach $_ (split(/\n/, $tr_output)) {
 
+	# Some traceroutes appear to print informational line to stdout,
+	# and we don't care.
+	/^traceroute to / && next;
+
 	# Each line starts with the ttl (space padded to two characters)
 	# and a space.
-	/^([0-9 ][0-9]) /;
+	/^([0-9 ][0-9]) / || die "Unable to traceroute output: $_";
 	my $ttl = $1 + 0;
 
 	my $query = 1;
@@ -429,7 +454,7 @@ sub _parse {
 		next query;
 	    };
 	    # query timed out
-	    /^ \*/ && do {
+	    /^ +\*/ && do {
 		$self->_add_hop_query($ttl, $query,
 				     TRACEROUTE_TIMEOUT,
 				     inet_ntoa(INADDR_NONE), 0);
@@ -472,7 +497,7 @@ sub _parse {
 		next ttl;
 	    };
 	    # Some LBL derived traceroutes print ttl stuff
-	    /^ \(ttl ?= ?\d!?\)/ && do {
+	    /^ \(ttl ?= ?\d+!\)/ && do {
 		$_ = substr($_, length($&));
 		next query;
 	    };
@@ -557,6 +582,27 @@ sub _query_accessor_common {
     }
 }
 
+sub debug_print {
+    my $self = shift;
+    my $level = shift;
+    my $fmtstring = shift;
+
+    return unless $self->debug() >= $level;
+
+    my($package, $filename, $line, $subroutine,
+       $hasargs, $wantarray, $evaltext, $is_require) = caller(0);
+
+    my $caller_line = $line;
+    my $caller_name = $subroutine;
+    my $caller_file = $filename;
+
+    my $string = sprintf($fmtstring, @_);
+
+    my $caller = "${caller_file}:${caller_name}:${caller_line}";
+
+    print STDERR "$caller: $string";
+}
+
 1;
 
 __END__
@@ -602,6 +648,7 @@ TIME_EXCEEDED messages.
 =head1 CONSTRUCTOR
 
     $obj = Net::Traceroute->new([base_port	=> $base_port,]
+				[debug		=> $debuglvl,]
 				[max_ttl	=> $max_ttl,]
 				[host		=> $host,]
 				[queries	=> $queries,]
@@ -619,8 +666,8 @@ call $obj->new() with the usual parameters.  The same rules apply
 about defining host; that is, traceroute will be run if it is defined.
 You can always pass host => undef in the constructor call.
 
-To use a template objects to perform a traceroute, you clone it and
-pass a host option.
+To use a template objects to perform a traceroute, you invoke new on
+it and pass a host option.
 
 Possible options are:
 
@@ -635,6 +682,9 @@ C<base_port + (nhops - 1)>
 where nhops is the number of hops required to reach the destination
 address.  Default is what the system traceroute uses (normally 33434).
 C<Traceroute>'s C<-p> option.
+
+B<debuglvl> - A number indicating how verbose debug information should
+be.  Please include debug=>9 output in bug reports.
 
 B<max_ttl> - Maximum number of hops to try before giving up.  Default
 is what the system traceroute uses (normally 30).  C<Traceroute>'s
