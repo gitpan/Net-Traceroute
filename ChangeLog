@@ -1,3 +1,12 @@
+2004-05-24  Daniel Hagerty  <hag@linnaean.org>
+	* Traceroute.pm:
+	** Update parser to deal with traceroute on current linux.
+	   Apparently some bozo thought some extra spacing here and there
+	   would be cute.
+	** Version bump to 1.08.
+	* TODO:
+	** New file.
+
 2000-11-17  Daniel Hagerty  <hag@linnaean.org>
 
 	* Traceroute.pm:

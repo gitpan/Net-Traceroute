@@ -3,5 +3,6 @@ MANIFEST
 MANIFEST.SKIP
 Makefile.PL
 README
+TODO
 Traceroute.pm
 test.pl

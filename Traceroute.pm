@@ -19,7 +19,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.17 2003/03/05 21:27:17 hag Exp $
+# $Id: Traceroute.pm,v 1.18 2004/05/24 19:33:23 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -48,7 +48,7 @@ use Socket;
 use Symbol qw(qualify_to_ref);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.07";		# Version number is only incremented by
+$VERSION = "1.08";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -499,7 +499,7 @@ sub _parse ($$) {
 		next query;
 	    };
 	    # round trip time of query
-	    /^  ([0-9.]+) ms/ && do {
+	    /^   ?([0-9.]+) ms/ && do {
 		$time = $1 + 0;
 
 		$self->_add_hop_query($hopno, $query,
