@@ -1,12 +1,17 @@
-I needed to talk to traceroute within some perl scripts, and actually
-use the information within the traceroute.  Nothing hard, nothing
-wierd, just traceroute.  If you don't know what traceroute is, you
-probably don't care about this module.
+This is version 1.04 of Net::Traceroute.  Users upgrading from
+previous versions, please note that there has been an interface
+change.  Your program may not work.  Please see "CLONING SUPPORT
+BEFORE 1.04" in the pod documentation.
 
-I have released version 1.01 of Net::Traceroute to CPAN and my home
+Net::Traceroute is available from CPAN and my home
 page.  My CPAN area is authors/id/H/HA/HAG, and my home page is
 currently http://www.linnaean.org/~hag/ .  I hope you find the
 module useful.
+
+Changes from previous version includes bug fixes, traceroute6 support
+(thanks to Mohacsi Janos <mohacsi@ik.bme.hu>), better subclassing
+support, and new traceroute options.
+
 
 This traceroute module works by parsing your vendor's traceroute
 command.  As such, some systems may not work; Windows is known not to.
@@ -26,6 +31,6 @@ if($tr->found) {
 	print "Same subnet\n";
     } else {
 	print "Last router is " .
-	    $tr->hop_query_host($hops - 1, 1) . "\n";
+	    $tr->hop_query_host($hops - 1, 0) . "\n";
     }
 }

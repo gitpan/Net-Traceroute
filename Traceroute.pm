@@ -1,5 +1,6 @@
 ###
 # Copyright 1998, 1999 Massachusetts Institute of Technology
+# Copyright 2000, 2001 Daniel Hagerty
 #
 # Permission to use, copy, modify, distribute, and sell this software and its
 # documentation for any purpose is hereby granted without fee, provided that
@@ -18,7 +19,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.9 2000/11/17 22:45:16 hag Exp $
+# $Id: Traceroute.pm,v 1.11 2001/09/01 03:20:55 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -43,15 +44,16 @@ use vars qw(@EXPORT $VERSION @ISA);
 use Exporter;
 use IO::Pipe;
 use IO::Select;
-use Socket;
+use Symbol qw(qualify_to_ref);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.03";		# Version number is only incremented by
+$VERSION = "1.04";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
 
-@EXPORT = qw(TRACEROUTE_OK
+@EXPORT = qw(
+	     TRACEROUTE_OK
 	     TRACEROUTE_TIMEOUT
 	     TRACEROUTE_UNKNOWN
 	     TRACEROUTE_BSDBUG
@@ -60,7 +62,9 @@ $VERSION = "1.03";		# Version number is only incremented by
 	     TRACEROUTE_UNREACH_PROTO
 	     TRACEROUTE_UNREACH_NEEDFRAG
 	     TRACEROUTE_UNREACH_SRCFAIL
-	     TRACEROUTE_UNREACH_FILTER_PROHIB);
+	     TRACEROUTE_UNREACH_FILTER_PROHIB
+	     TRACEROUTE_UNREACH_ADDR
+	     );
 
 ###
 
@@ -79,72 +83,120 @@ sub TRACEROUTE_UNREACH_PROTO { 6 }
 sub TRACEROUTE_UNREACH_NEEDFRAG { 7 }
 sub TRACEROUTE_UNREACH_SRCFAIL { 8 }
 sub TRACEROUTE_UNREACH_FILTER_PROHIB { 9 }
+sub TRACEROUTE_UNREACH_ADDR { 10 }
 
 ## Internal data used throughout the module
 
 # Instance variables that are nothing special, and have an obvious
 # corresponding accessor/mutator method.
-my @simple_instance_vars = qw(base_port
-			      debug
-			      host
-			      max_ttl
-			      queries
-			      query_timeout
-			      timeout);
+my @public_instance_vars =
+    qw(
+       base_port
+       debug
+       host
+       max_ttl
+       packetlen
+       queries
+       query_timeout
+       source_address
+       trace_program
+       timeout
+       no_fragment
+       );
+
+my @simple_instance_vars = (
+			    qw(
+			       pathmtu
+			       stat
+			       _text_accumulator
+			       ),
+			    @public_instance_vars,
+			    );
 
 # Field offsets for query info array
-my $query_stat_offset = 0;
-my $query_host_offset = 1;
-my $query_time_offset = 2;
+use constant query_stat_offset => 0;
+use constant query_host_offset => 1;
+use constant query_time_offset => 2;
 
 ###
 # Public methods
 
 # Constructor
 
-sub new {
+sub new ($;%) {
     my $self = shift;
     my $type = ref($self) || $self;
 
-    my %hash = ();
+    my %arg = @_;
+
+    if(!ref($self)) {
+	$self = bless {}, $type;
+    }
+
+    # Take our constructer arguments and initialize the attributes with
+    # them.
+    my $var;
+    foreach $var (@public_instance_vars)  {
+	if(defined($arg{$var})) {
+	    $self->$var($arg{$var});
+	}
+    }
+
+    # Initialize debug if it isn't already.
+    $self->debug(0) if(!defined($self->debug));
+    $self->trace_program("traceroute") if(!defined($self->trace_program));
+
+    $self->debug_print(1, "Running in debug mode\n");
+
+    # Initialize status
+    $self->stat(TRACEROUTE_UNKNOWN);
+
+    if(defined($self->host)) {
+	$self->traceroute;
+    }
+
+    $self->debug_print(9, Dumper($self));
+
+    $self;
+}
+
+sub clone ($;%) {
+    my $self = shift;
+    my $type = ref($self);
 
     my %arg = @_;
 
-    my $me = bless \%hash, $type;
+    die "Can't clone a non-object!" unless($type);
 
-    # If we've been called through an object, use that one as a template.
+    my $clone = bless {}, $type;
+
     # Does a shallow copy of the hash key/values to the new hash.
     if(ref($self)) {
 	my($key, $val);
 	while(($key, $val) = each %{$self}) {
-	    $me->{$key} = $val;
+	    $clone->{$key} = $val;
 	}
     }
 
     # Take our constructer arguments and initialize the attributes with
     # them.
     my $var;
-    foreach $var (@simple_instance_vars)  {
+    foreach $var (@public_instance_vars)  {
 	if(defined($arg{$var})) {
-	    $me->$var($arg{$var});
+	    $clone->$var($arg{$var});
 	}
     }
 
-    # Initialize debug if it isn't already.
-    $me->debug(0) if(!defined($me->debug));
-
-    $me->debug_print(1, "Running in debug mode\n");
-
     # Initialize status
-    $me->stat(TRACEROUTE_UNKNOWN);
+    $clone->stat(TRACEROUTE_UNKNOWN);
 
-    if(defined($me->host)) {
-	$me->traceroute;
+    if(defined($clone->host)) {
+	$clone->traceroute;
     }
 
-    $me->debug_print(9, Dumper($me));
+    $clone->debug_print(9, Dumper($clone));
 
-    $me;
+    return($clone);
 }
 
 ##
@@ -152,9 +204,9 @@ sub new {
 
 # Do the actual work.  Not really a published interface; completely
 # useable from the constructor.
-sub traceroute {
+sub traceroute ($) {
     my $self = shift;
-    my $host = shift || $self->host();
+    my $host = $self->host();
 
     $self->debug_print(1, "Performing traceroute\n");
 
@@ -214,91 +266,9 @@ sub traceroute {
 }
 
 ##
-# Accesssor/mutators for ordinary instance variables.  (Read/Write)
-
-sub base_port {
-    my $self = shift;
-    my $elem = "base_port";
-
-    my $old = $self->{$elem};
-    $self->{$elem} = $_[0] if @_;
-    return $old;
-}
-
-sub debug {
-    my $self = shift;
-    my $elem = "debug";
-
-    my $old = $self->{$elem};
-    $self->{$elem} = $_[0] if @_;
-    return $old;
-}
-
-sub max_ttl {
-    my $self = shift;
-    my $elem = "max_ttl";
-
-    my $old = $self->{$elem};
-    $self->{$elem} = $_[0] if @_;
-    return $old;
-}
-
-sub queries {
-    my $self = shift;
-    my $elem = "queries";
-
-    my $old = $self->{$elem};
-    $self->{$elem} = $_[0] if @_;
-    return $old;
-}
-
-sub query_timeout {
-    my $self = shift;
-    my $elem = "query_timeout";
-
-    my $old = $self->{$elem};
-    $self->{$elem} = $_[0] if @_;
-    return $old;
-}
-
-sub host {
-    my $self = shift;
-    my $elem = "host";
-
-    my $old = $self->{$elem};
-
-    # Internal representation always uses IP address in string form.
-    if(@_) {
-	my $inet = eval { inet_aton $_[0] } || die "unknown host: $_[0]";
-	$self->{$elem} = inet_ntoa($inet);
-    }
-    return $old;
-}
-
-sub timeout {
-    my $self = shift;
-    my $elem = "timeout";
-
-    my $old = $self->{$elem};
-    $self->{$elem} = $_[0] if @_;
-    return $old;
-}
-
-# Accessor for status of this traceroute object.  Externally read only
-# (not enforced).
-sub stat {
-    my $self = shift;
-    my $elem = "stat";
-
-    my $old = $self->{$elem};
-    $self->{$elem} = $_[0] if @_;
-    return $old;
-}
-
-##
 # Hop and query functions
 
-sub hops {
+sub hops ($) {
     my $self = shift;
 
     my $hop_ary = $self->{"hops"};
@@ -308,7 +278,7 @@ sub hops {
     return(int(@{$hop_ary}));
 }
 
-sub hop_queries {
+sub hop_queries ($$) {
     my $self = shift;
     my $hop = (shift) - 1;
 
@@ -316,17 +286,24 @@ sub hop_queries {
 	int(@{$self->{"hops"}->[$hop]});
 }
 
-sub found {
+sub found ($) {
     my $self = shift;
     my $hops = $self->hops();
 
     if($hops) {
-	my $host = $self->host;
-
 	my $last_hop = $self->hop_query_host($hops, 0);
 	my $stat = $self->hop_query_stat($hops,  0);
 
-	if( $last_hop eq $host &&
+	# Ugh, what to do here?
+	# In IPv4, a host may send the port-unreachable ICMP from an
+	# address other than the one we sent to. (and in fact, I use
+	# this feature quite a bit to map out networks)
+	# IIRC, IPv6 mandates that the unreachable comes from the address we
+	# sent to, so we don't have this problem.
+
+	# This assumption will that any last hop answer that wasn't an
+	# error may bite us.
+	if(
 	   (($stat == TRACEROUTE_OK) || ($stat == TRACEROUTE_BSDBUG) ||
 	    ($stat == TRACEROUTE_UNREACH_PROTO))) {
 	    return(1);
@@ -335,16 +312,31 @@ sub found {
     return(undef);
 }
 
-sub hop_query_stat {
-    _query_accessor_common(@_,$query_stat_offset);
+sub hop_query_stat ($$) {
+    _query_accessor_common(@_,query_stat_offset);
 }
 
-sub hop_query_host {
-    _query_accessor_common(@_,$query_host_offset);
+sub hop_query_host ($$) {
+    _query_accessor_common(@_,query_host_offset);
 }
 
-sub hop_query_time {
-    _query_accessor_common(@_,$query_time_offset);
+sub hop_query_time ($$) {
+    _query_accessor_common(@_,query_time_offset);
+}
+
+##
+# Accesssor/mutators for ordinary instance variables.  (Read/Write)
+# We generate these.
+
+foreach my $name (@simple_instance_vars) {
+    my $sym = qualify_to_ref($name);
+    my $code = sub {
+	my $self = shift;
+	my $old = $self->{$name};
+	$self->{$name} = $_[0] if @_;
+	return $old;
+    };
+    *{$sym} = $code;
 }
 
 ###
@@ -353,14 +345,16 @@ sub hop_query_time {
 # Many of these would be useful to override in a derived class.
 
 # Build and return the pipe that talks to our child traceroute.
-sub _make_pipe {
+sub _make_pipe ($) {
     my $self = shift;
 
     my @tr_args;
 
-    push(@tr_args, $self->_tr_program_name());
+    push(@tr_args, $self->trace_program());
     push(@tr_args, $self->_tr_cmd_args());
     push(@tr_args, $self->host());
+    my @plen = ($self->packetlen) || (); # Sigh.
+    push(@tr_args, @plen);
 
     # XXX we probably shouldn't throw stderr away.
     open(SAVESTDERR, ">&STDERR");
@@ -371,7 +365,7 @@ sub _make_pipe {
     # IO::Pipe is very unhelpful about error catching.  It calls die
     # in the child program, but returns a reasonable looking object in
     # the parent.  This is really a standard unix fork/exec issue, but
-    # the library really doesn't help us.
+    # the library doesn't help us.
     my $result = $pipe->reader(@tr_args);
 
     open(STDERR, ">& SAVESTDERR");
@@ -386,24 +380,22 @@ sub _make_pipe {
     $result;
 }
 
-# Return the name of the traceroute executable itself
-sub _tr_program_name {
-    "traceroute";
-}
-
 # How to map some of the instance variables to command line arguments
 my %cmdline_map = ("base_port" => "-p",
 		   "max_ttl" => "-m",
 		   "queries" => "-q",
-		   "query_timeout" => "-w");
+		   "query_timeout" => "-w",
+		   "source_address" => "-s");
 
 # Build a list of command line arguments
-sub _tr_cmd_args {
+sub _tr_cmd_args ($) {
     my $self = shift;
 
     my @result;
 
     push(@result, "-n");
+
+    push(@result, "-F") if($self->no_fragment);
 
     my($key, $flag);
     while(($key, $flag) = each %cmdline_map) {
@@ -423,24 +415,31 @@ my %icmp_map = (N => TRACEROUTE_UNREACH_NET,
 		P => TRACEROUTE_UNREACH_PROTO,
 		F => TRACEROUTE_UNREACH_NEEDFRAG,
 		S => TRACEROUTE_UNREACH_SRCFAIL,
+		A => TRACEROUTE_UNREACH_ADDR,
 		X => TRACEROUTE_UNREACH_FILTER_PROHIB);
 
 # Do the grunt work of parsing the output.
-sub _parse {
+sub _parse ($$) {
     my $self = shift;
     my $tr_output = shift;
 
-  ttl:
+  line:
     foreach $_ (split(/\n/, $tr_output)) {
 
 	# Some traceroutes appear to print informational line to stdout,
 	# and we don't care.
 	/^traceroute to / && next;
 
-	# Each line starts with the ttl (space padded to two characters)
+	# NetBSD's traceroute does this, don't know who else.
+	/^message too big, trying new MTU = (\d+)/ && do {
+	    $self->pathmtu($1);
+	    next;
+	};
+
+	# Each line starts with the hopno (space padded to two characters)
 	# and a space.
 	/^([0-9 ][0-9]) / || die "Unable to traceroute output: $_";
-	my $ttl = $1 + 0;
+	my $hopno = $1 + 0;
 
 	my $query = 1;
 	my $addr;
@@ -457,11 +456,17 @@ sub _parse {
 		$_ = substr($_, length($&));
 		next query;
 	    };
+	    # ipv6 address of a response
+	    /^ ([0-9a-fA-F:]+)/ && do {
+		$addr = $1;
+		$_ = substr($_, length($&));
+		next query;
+	    };
 	    # round trip time of query
 	    /^  ([0-9.]+) ms/ && do {
 		$time = $1 + 0;
 
-		$self->_add_hop_query($ttl, $query,
+		$self->_add_hop_query($hopno, $query,
 				     TRACEROUTE_OK, $addr, $time);
 		$query++;
 		$_ = substr($_, length($&));
@@ -469,7 +474,7 @@ sub _parse {
 	    };
 	    # query timed out
 	    /^ +\*/ && do {
-		$self->_add_hop_query($ttl, $query,
+		$self->_add_hop_query($hopno, $query,
 				     TRACEROUTE_TIMEOUT,
 				     inet_ntoa(INADDR_NONE), 0);
 		$query++;
@@ -478,7 +483,7 @@ sub _parse {
 	    };
 	    # extra information from the probe (random ICMP info
 	    # and such).
-	    /^ (![NHPFSX]?|!<\d+>)/ && do {
+	    /^ (![NHPFSAX]?|!<\d+>)/ && do {
 		my $flag = $1;
 		my $matchlen = length($&);
 
@@ -488,19 +493,19 @@ sub _parse {
 		my $query = $query - 1;
 
 		if($flag =~ /^!<\d>$/) {
-		    $self->_change_hop_query_stat($ttl, $query,
+		    $self->_change_hop_query_stat($hopno, $query,
 						 TRACEROUTE_UNKNOWN);
 		} elsif($flag =~ /^!$/) {
-		    $self->_change_hop_query_stat($ttl, $query,
+		    $self->_change_hop_query_stat($hopno, $query,
 						 TRACEROUTE_BSDBUG);
-		} elsif($flag =~ /^!([NHPFSX])$/) {
+		} elsif($flag =~ /^!([NHPFSAX])$/) {
 		    my $icmp = $1;
 
 		    # Shouldn't happen
 		    die "Unable to traceroute output (flag $icmp)!"
 			unless(defined($icmp_map{$icmp}));
 
-		    $self->_change_hop_query_stat($ttl, $query,
+		    $self->_change_hop_query_stat($hopno, $query,
 						 $icmp_map{$icmp});
 		}
 		$_ = substr($_, $matchlen);
@@ -508,7 +513,7 @@ sub _parse {
 	    };
 	    # Nothing left, next line.
 	    /^$/ && do {
-		next ttl;
+		next line;
 	    };
 	    # Some LBL derived traceroutes print ttl stuff
 	    /^ \(ttl ?= ?\d+!\)/ && do {
@@ -521,16 +526,16 @@ sub _parse {
     }
 }
 
-sub _text_accumulator {
+# I don't understand why this one won't work with the accessor generator.
+sub _text_accumulator ($;$) {
     my $self = shift;
-    my $elem = "_text_accumulator";
-
-    my $old = $self->{$elem};
-    $self->{$elem} .= $_[0] if @_;
+    my $name = "_text_accumulator";
+    my $old = $self->{$name};
+    $self->{$name} = $_[0] if @_;
     return $old;
 }
 
-sub _zero_text_accumulator {
+sub _zero_text_accumulator ($) {
     my $self = shift;
     my $elem = "_text_accumulator";
 
@@ -538,13 +543,13 @@ sub _zero_text_accumulator {
 }
 
 # Hop stuff
-sub _zero_hops {
+sub _zero_hops ($) {
     my $self = shift;
 
     delete $self->{"hops"};
 }
 
-sub _add_hop_query {
+sub _add_hop_query ($$$$$$) {
     my $self = shift;
 
     my $hop = (shift) - 1;
@@ -557,7 +562,7 @@ sub _add_hop_query {
     $self->{"hops"}->[$hop]->[$query] = [ $stat, $host, $time ];
 }
 
-sub _change_hop_query_stat {
+sub _change_hop_query_stat ($$$$) {
     my $self = shift;
 
     # Zero base these
@@ -566,10 +571,10 @@ sub _change_hop_query_stat {
 
     my $stat = shift;
 
-    $self->{"hops"}->[$hop]->[$query]->[ $query_stat_offset ] = $stat;
+    $self->{"hops"}->[$hop]->[$query]->[ query_stat_offset ] = $stat;
 }
 
-sub _query_accessor_common {
+sub _query_accessor_common ($$$) {
     my $self = shift;
 
     # Zero base these
@@ -585,7 +590,7 @@ sub _query_accessor_common {
 	my $aref;
       query:
 	foreach $aref (@{$self->{"hops"}->[$hop]}) {
-	    $query_stat = $aref->[$query_stat_offset];
+	    $query_stat = $aref->[query_stat_offset];
 	    $query_stat == TRACEROUTE_TIMEOUT && do { next query };
 	    $query_stat == TRACEROUTE_UNKNOWN && do { next query };
 	    do { return $aref->[$which_one] };
@@ -596,7 +601,7 @@ sub _query_accessor_common {
     }
 }
 
-sub debug_print {
+sub debug_print ($$$;@) {
     my $self = shift;
     my $level = shift;
     my $fmtstring = shift;
@@ -633,7 +638,7 @@ Net::Traceroute - traceroute(1) functionality in perl
 	my $hops = $tr->hops;
 	if($hops > 1) {
 	    print "Router was " .
-		$tr->hop_query_host($tr->hops - 1, 1) . "\n";
+		$tr->hop_query_host($tr->hops - 1, 0) . "\n";
 	}
     }
 
@@ -659,7 +664,7 @@ To trace a route, UDP packets are sent with a small TTL (time-to-live)
 field in an attempt to get intervening routers to generate ICMP
 TIME_EXCEEDED messages.
 
-=head1 CONSTRUCTOR
+=head1 CONSTRUCTOR AND CLONING
 
     $obj = Net::Traceroute->new([base_port	=> $base_port,]
 				[debug		=> $debuglvl,]
@@ -667,21 +672,21 @@ TIME_EXCEEDED messages.
 				[host		=> $host,]
 				[queries	=> $queries,]
 				[query_timeout	=> $query_timeout,]
-				[timeout	=> $timeout,]);
-    $frob = $obj->new([options]);
+				[timeout	=> $timeout,]
+				[source_address	=> $srcaddr,]
+				[packetlen	=> $packetlen,]
+				[trace_program	=> $program,]
+				[no_fragment	=> $nofrag,]);
+    $frob = $obj->clone([options]);
 
 This is the constructor for a new Net::Traceroute object.  If given
-C<host>, it will actually perform the traceroute; otherwise it will return
-an empty template object.  This can be used to setup a template object
-with some preset defaults for firing off multiple traceroutes.
+C<host>, it will actually perform the traceroute.  You can call the
+traceroute method later.
 
 Given an existing Net::Traceroute object $obj as a template, you can
-call $obj->new() with the usual parameters.  The same rules apply
-about defining host; that is, traceroute will be run if it is defined.
-You can always pass host => undef in the constructor call.
-
-To use a template objects to perform a traceroute, you invoke new on
-it and pass a host option.
+call $obj->clone() with the usual constructor parameters.  The same
+rules apply about defining host; that is, traceroute will be run if it
+is defined.  You can always pass host => undef to clone.
 
 Possible options are:
 
@@ -718,7 +723,27 @@ host has been reached, or traceroute counts to infinity (C<max_ttl> *
 C<queries> * C<query_timeout>).  Note that this option is implemented
 by Net::Traceroute, not the underlying traceroute command.
 
+B<source_address> - Select the source address that traceroute wil use.
+
+B<packetlen> - Length of packets to use.  Traceroute tries to make the
+IP packet exactly this long.
+
+B<trace_program> - Name of the traceroute program.  Defaults to traceroute.
+You can pass traceroute6 to do IPv6 traceroutes.
+
+B<no_fragment> - Set the IP don't fragment bit.  Some traceroute
+programs will perform path mtu discovery with this option.
+
 =head1 METHODS
+
+=over 4
+
+=item traceroute
+
+Run system traceroute, and parse the results.  Will fill in the rest
+of the object for informational queries.
+
+=back
 
 =head2 Controlling traceroute invocation
 
@@ -730,8 +755,8 @@ Changing an instance variable will only affect newly performed
 traceroutes.  Setting a different value on a traceroute object that
 has already performed a trace has no effect.
 
-See the constructor documentation for information about each
-method/constructor option.
+See the constructor documentation for information about methods that
+aren't documented here.
 
 =over 4
 
@@ -746,6 +771,14 @@ method/constructor option.
 =item host([HOST])
 
 =item timeout([TIMEOUT])
+
+=item source_address([SRC])
+
+=item packetlen([LEN])
+
+=item trace_program([PROGRAM])
+
+=item no_fragment([PROGRAM])
 
 =back
 
@@ -771,6 +804,12 @@ actually reachable.
 
 Returns 1 if the host was found, undef otherwise.
 
+=item pathmtu
+
+If your traceroute supports MTU discovery, this method will return the
+MTU in some circumstances.  You must set no_fragment, and must use a
+packetlen larger than the path mtu for this to be set.
+
 =item hops
 
 Returns the number of hops that it took to reach the host.
@@ -785,6 +824,9 @@ should normally be the same for every query.
 Return the status of the given HOP's QUERY.  The return status can be
 one of the following (each of these is actually an integer constant
 function defined in Net::Traceroute's export list):
+
+QUERY can be zero, in which case the first succesful query will be
+returned.
 
 =over 4
 
@@ -838,13 +880,33 @@ bug.
 Return the dotted quad IP address of the host that responded to HOP's
 QUERY.
 
+QUERY can be zero, in which case the first succesful query will be
+returned.
+
 =item hop_query_time(HOP, QUERY)
 
 Return the round trip time associated with the given HOP's query.  If
 your system's traceroute supports fractional second timing, so
 will Net::Traceroute.
 
+QUERY can be zero, in which case the first succesful query will be
+returned.
+
 =back
+
+=head1 CLONING SUPPORT BEFORE 1.04
+
+Net::Traceroute Versions before 1.04 used new to clone objects.  This
+has been deprecated in favor of the clone() method.
+
+If you have code of the form:
+
+ my $template = Net::Traceroute->new();
+ my $tr = $template->new(host => "localhost");
+
+You need to change the $template->new to $template->clone.
+
+This behavior was changed because it interfered with subclassing.
 
 =head1 BUGS
 
@@ -856,9 +918,10 @@ code assumes there is "One true traceroute".
 The actual functionality of traceroute could also be implemented
 natively in perl or linked in from a C library.
 
-As of 0.7 (the first public release) I consider the interface stable.
-Violent changes to interface are always possible, but I will retain
-compatibility with this interface in future releases.
+Versions prior to 1.04 had some interface issues for subclassing.
+These issues have been addressed, but required a public interface
+change.  If you were relying on the behavior of new to clone existing
+objects, your code needs to be fixed.
 
 =head1 SEE ALSO
 
@@ -871,6 +934,7 @@ Daniel Hagerty <hag@ai.mit.edu>
 =head1 COPYRIGHT
 
 Copyright 1998, 1999 Massachusetts Institute of Technology
+Copyright 2000, 2001 Daniel Hagerty
 
 Permission to use, copy, modify, distribute, and sell this software
 and its documentation for any purpose is hereby granted without fee,
