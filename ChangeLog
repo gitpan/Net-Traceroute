@@ -1,3 +1,9 @@
+2000-08-15  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Added error checking around our use of IO::Pipe.
+	** Incremented version number for release
+
 1999-11-28  Daniel Hagerty  <hag@linnaean.org>
 
 	* First ChangeLog entry.

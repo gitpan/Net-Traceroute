@@ -18,7 +18,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.6 1999/11/28 07:27:42 hag Exp $
+# $Id: Traceroute.pm,v 1.8 2000/08/15 23:04:43 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -46,7 +46,7 @@ use IO::Select;
 use Socket;
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.01";		# Version number is only incremented by
+$VERSION = "1.02";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -178,7 +178,7 @@ sub traceroute {
 	my $fh;
 	foreach $fh (@ready) {
 	    my $buf;
-	    my $len = $fh->sysread($buf, 2048);
+	    my $len = $fh->read($buf, 2048);
 
 	    die "read error: $!" unless(defined($len));
 
@@ -359,15 +359,26 @@ sub _make_pipe {
     push(@tr_args, $self->_tr_cmd_args());
     push(@tr_args, $self->host());
 
+    # XXX we probably shouldn't throw stderr away.
     open(SAVESTDERR, ">&STDERR");
     open(STDERR, ">/dev/null");
 
     my $pipe = new IO::Pipe;
 
+    # IO::Pipe is very unhelpful about error catching.  It calls die
+    # in the child program, but returns a reasonable looking object in
+    # the parent.  This is really a standard unix fork/exec issue, but
+    # the library really doesn't help us.
     my $result = $pipe->reader(@tr_args);
 
     open(STDERR, ">& SAVESTDERR");
     close(SAVESTDERR);
+
+    # XXX We're going to assume that an eof right after fork/exec is
+    # actually a failure.  This is quite dubious.
+    if($result->eof) {
+  	die "No output from traceroute.  Exec failure?";
+    }
 
     $result;
 }
