@@ -19,7 +19,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.12 2001/09/01 04:19:37 hag Exp $
+# $Id: Traceroute.pm,v 1.16 2003/02/16 16:38:34 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -48,7 +48,7 @@ use Socket;
 use Symbol qw(qualify_to_ref);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.05";		# Version number is only incremented by
+$VERSION = "1.06";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -130,9 +130,35 @@ sub new ($;%) {
 
     my %arg = @_;
 
+    if(exists($arg{backend})) {
+	my $backend = $arg{backend};
+	if($backend ne "Parser") {
+	    my $module = "Net::Traceroute::$backend";
+	    eval "require $module";
+
+	    # Ignore error on the possibility that they just defined
+	    # the module at runtime, rather than an actual module in
+	    # the filesystem.
+	    my $newref = qualify_to_ref("new", $module);
+	    my $newcode = *{$newref}{CODE};
+	    if(!defined($newcode)) {
+		die "Backend implementation $backend has no new";
+	    }
+	    return(&{$newcode}($module, @_));
+	}
+    }
+
     if(!ref($self)) {
 	$self = bless {}, $type;
     }
+
+    $self->init(%arg);
+    $self;
+}
+
+sub init {
+    my $self = shift;
+    my %arg = @_;
 
     # Take our constructer arguments and initialize the attributes with
     # them.
@@ -157,8 +183,6 @@ sub new ($;%) {
     }
 
     $self->debug_print(9, Dumper($self));
-
-    $self;
 }
 
 sub clone ($;%) {
@@ -294,6 +318,18 @@ sub found ($) {
     if($hops) {
 	my $last_hop = $self->hop_query_host($hops, 0);
 	my $stat = $self->hop_query_stat($hops,  0);
+
+	# Is this the correct thing to be doing?  This gap in
+	# semantics missed me, and wasn't caught until post 1.5 It
+	# would be a good to audit the semantics here.  It's possible
+	# that a prior version change broke this.
+
+	# Getting good regression tests would be nice, but traceroute
+	# is an annoying thing to do regression on -- you usually
+	# don't have enough control over the network.  If I was good,
+	# I would be collecting my bug reports, and saving the
+	# traceroute output produced there.
+	return(undef) if(!defined($last_hop));
 
 	# Ugh, what to do here?
 	# In IPv4, a host may send the port-unreachable ICMP from an
