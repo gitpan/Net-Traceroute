@@ -17,12 +17,15 @@
 # Date:		Sat Oct 17 22:33:40 1998
 # Description:	test stuff for Tree::Radix
 #
-# $Id: test.pl,v 1.3 1999/11/28 07:13:36 hag Exp $
+# $Id: test.pl,v 1.4 2000/11/17 22:45:16 hag Exp $
 
 # Before `make install' is performed this script should be runnable with
 # `make test'. After `make install' it should work as `perl test.pl'
 
 ######################### We start with some black magic to print on failure.
+
+# Turn on warnings.
+$^W = 1;
 
 # Change 1..1 below to 1..last_test_to_print .
 # (It may become useful if the test is moved to ./t subdirectory.)

@@ -18,7 +18,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.8 2000/08/15 23:04:43 hag Exp $
+# $Id: Traceroute.pm,v 1.9 2000/11/17 22:45:16 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -46,7 +46,7 @@ use IO::Select;
 use Socket;
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.02";		# Version number is only incremented by
+$VERSION = "1.03";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -129,6 +129,9 @@ sub new {
 	    $me->$var($arg{$var});
 	}
     }
+
+    # Initialize debug if it isn't already.
+    $me->debug(0) if(!defined($me->debug));
 
     $me->debug_print(1, "Running in debug mode\n");
 
