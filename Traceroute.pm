@@ -18,7 +18,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.4 1999/11/17 05:20:07 hag Exp $
+# $Id: Traceroute.pm,v 1.6 1999/11/28 07:27:42 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -43,10 +43,10 @@ use vars qw(@EXPORT $VERSION @ISA);
 use Exporter;
 use IO::Pipe;
 use IO::Select;
-use Net::Inet;
+use Socket;
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.00";		# Version number is only incremented by
+$VERSION = "1.01";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -266,7 +266,7 @@ sub host {
 
     # Internal representation always uses IP address in string form.
     if(@_) {
-	my $inet = inet_aton $_[0] || die "unknown host: $_[0]\n";
+	my $inet = eval { inet_aton $_[0] } || die "unknown host: $_[0]";
 	$self->{$elem} = inet_ntoa($inet);
     }
     return $old;

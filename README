@@ -3,7 +3,7 @@ use the information within the traceroute.  Nothing hard, nothing
 wierd, just traceroute.  If you don't know what traceroute is, you
 probably don't care about this module.
 
-I have released version 1.0 of Net::Traceroute to CPAN and my home
+I have released version 1.01 of Net::Traceroute to CPAN and my home
 page.  My CPAN area is authors/id/H/HA/HAG, and my home page is
 currently http://www.linnaean.org/~hag/ .  I hope you find the
 module useful.

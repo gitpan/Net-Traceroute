@@ -1,0 +1,10 @@
+1999-11-28  Daniel Hagerty  <hag@linnaean.org>
+
+	* First ChangeLog entry.
+	* Traceroute.pm:
+	** Bumped version to 1.01
+	** Changed Net::Inet to Socket.  Only needed inet_aton and inet_ntoa.
+	** host(): Wrapped inet_aton in an eval.
+	* test.pl: Rewrote test 3 to be slightly more general, as too
+	many operating systems have restrictions on what you can trace
+	to.  Ask user if test is difficult.
