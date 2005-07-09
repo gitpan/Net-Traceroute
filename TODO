@@ -1,6 +1,6 @@
 -*-Outline-*-
 
-* More testing would be good.
+* More testing would be good.  I'm generally getting sick of my poor test factoring.
 * I hate the possibly interactive nature of make test.  Think about
   what to do about it.
 * Normalize icmp_map and regular expressions derived from it.
@@ -8,6 +8,3 @@
   some issues with the timeout functionality in this code.  Haven't
   had copious free time to examine the issue.  This should be a test
   case.
-* Add support for using icmp based traceroute.  Simple matter of
-  passing the flag to traceroute, provided that it supports the function
-  at all.

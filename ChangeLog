@@ -1,3 +1,17 @@
+2005-07-09  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Fix regexp bug in how numeric icmp output codes were handled.
+	** Document use_icmp.
+	* TODO: update for current issues
+
+2005-07-07  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Add request use_icmp option (needs documentation).
+	** Skip MPLS label stack information (for now).
+	** Bump version for next release.
+
 2004-05-24  Daniel Hagerty  <hag@linnaean.org>
 	* Traceroute.pm:
 	** Update parser to deal with traceroute on current linux.

@@ -1,6 +1,6 @@
 ###
 # Copyright 1998, 1999 Massachusetts Institute of Technology
-# Copyright 2000, 2001 Daniel Hagerty
+# Copyright 2000-2005 Daniel Hagerty
 #
 # Permission to use, copy, modify, distribute, and sell this software and its
 # documentation for any purpose is hereby granted without fee, provided that
@@ -19,7 +19,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.18 2004/05/24 19:33:23 hag Exp $
+# $Id: Traceroute.pm,v 1.22 2005/07/09 20:22:58 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -48,7 +48,7 @@ use Socket;
 use Symbol qw(qualify_to_ref);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.08";		# Version number is only incremented by
+$VERSION = "1.09";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -103,6 +103,7 @@ my @public_instance_vars =
        trace_program
        timeout
        no_fragment
+       use_icmp
        );
 
 my @simple_instance_vars = (
@@ -123,12 +124,17 @@ use constant query_time_offset => 2;
 
 # Constructor
 
+# XXX Stanley Hopcroft is having issues with timeouts.  Track down his
+# email and produce a test case.
+
 sub new ($;%) {
     my $self = shift;
     my $type = ref($self) || $self;
 
     my %arg = @_;
 
+    # We implement a goofy UI so that all programmers can use
+    # Net::Traceroute as a constructor for all types of object.
     if(exists($arg{backend})) {
 	my $backend = $arg{backend};
 	if($backend ne "Parser") {
@@ -393,6 +399,7 @@ sub _make_pipe ($) {
     push(@tr_args, @plen);
 
     # XXX we probably shouldn't throw stderr away.
+    # XXX we probably shouldn't use named filehandles.
     open(SAVESTDERR, ">&STDERR");
     open(STDERR, ">/dev/null");
 
@@ -416,12 +423,22 @@ sub _make_pipe ($) {
     $result;
 }
 
-# How to map some of the instance variables to command line arguments
-my %cmdline_map = ("base_port" => "-p",
-		   "max_ttl" => "-m",
-		   "queries" => "-q",
-		   "query_timeout" => "-w",
-		   "source_address" => "-s");
+# Map some instance variables to command line arguments that take
+# arguments.
+my %cmdline_valuemap =
+    ( "base_port" => "-p",
+      "max_ttl" => "-m",
+      "queries" => "-q",
+      "query_timeout" => "-w",
+      "source_address" => "-s",
+      );
+
+# Map more instance variables to command line arguments that are
+# flags.
+my %cmdline_flagmap =
+    ( "no_fragment" => "-F",
+      "use_icmp" => "-I",
+      );
 
 # Build a list of command line arguments
 sub _tr_cmd_args ($) {
@@ -431,10 +448,13 @@ sub _tr_cmd_args ($) {
 
     push(@result, "-n");
 
-    push(@result, "-F") if($self->no_fragment);
-
     my($key, $flag);
-    while(($key, $flag) = each %cmdline_map) {
+
+    while(($key, $flag) = each %cmdline_flagmap) {
+	push(@result, $flag) if($self->$key());;
+    }
+
+    while(($key, $flag) = each %cmdline_valuemap) {
 	my $val = $self->$key();
 	if(defined $val) {
 	    push(@result, $flag, $val);
@@ -459,6 +479,9 @@ sub _parse ($$) {
     my $self = shift;
     my $tr_output = shift;
 
+    # This is a crufty hand coded parser that does its job well
+    # enough.  The approach of regular expressions without state is
+    # far from perfect, but it gets the job done.
   line:
     foreach $_ (split(/\n/, $tr_output)) {
 
@@ -466,11 +489,28 @@ sub _parse ($$) {
 	# and we don't care.
 	/^traceroute to / && next;
 
-	# NetBSD's traceroute does this, don't know who else.
+	# AIX 5L has to be different.
+	/^trying to get / && next;
+	/^source should be / && next;
+
+	# NetBSD's traceroute emits info about path MTU discovery if
+	# you want, don't know who else does this.
 	/^message too big, trying new MTU = (\d+)/ && do {
 	    $self->pathmtu($1);
 	    next;
 	};
+
+	# For now, discard MPLS label stack information emitted by
+	# some vendor's traceroutes.  Once I'm sure I'm sure I
+	# understand the semantics offered by both the underlying MPLS
+	# and whatever crazy limits the MPLS patch has, I can think
+	# about an interface.  My reading of the code is that you will
+	# get the label stack of the last query.  If this isn't
+	# representative of all of the queries, it sucks to be you.
+	# You can still get what you need, but it would be nice if the
+	# tool didn't throw information away...
+	# possibilities.
+	/^\s+MPLS Label=(\d+) CoS=(\d) TTL=(\d+) S=(\d+)/ && next;
 
 	# Each line starts with the hopno (space padded to two characters)
 	# and a space.
@@ -483,7 +523,6 @@ sub _parse ($$) {
 
 	$_ = substr($_,length($&));
 
-	# Munch through the line
       query:
 	while($_) {
 	    # ip address of a response
@@ -517,9 +556,23 @@ sub _parse ($$) {
 		$_ = substr($_, length($&));
 		next query;
 	    };
+
 	    # extra information from the probe (random ICMP info
 	    # and such).
-	    /^ (![NHPFSAX]?|!<\d+>)/ && do {
+
+	    # There was a bug in this regexp prior to 1.09; reorder
+	    # the clauses and everything gets better.
+
+	    # Note that this is actually a very subtle DWIM on perl's
+	    # part: in "pure" regular expression theory, order of
+	    # expression doesn't matter; the resultant DFA has no
+	    # order concept.  Without perl DWIMing on our regexp, we'd
+	    # write the regexp and code to perform a token lookahead:
+	    # the transitions after ! would be < for digits, the keys
+	    # of icmp map, and finally whitespace or end of string
+	    # indicate a lone "!".
+
+	    /^ (!<\d+>|![NHPFSAX]?)/ && do {
 		my $flag = $1;
 		my $matchlen = length($&);
 
@@ -712,7 +765,8 @@ TIME_EXCEEDED messages.
 				[source_address	=> $srcaddr,]
 				[packetlen	=> $packetlen,]
 				[trace_program	=> $program,]
-				[no_fragment	=> $nofrag,]);
+				[no_fragment	=> $nofrag,]
+				[use_icmp	=> $useicmp,]);
     $frob = $obj->clone([options]);
 
 This is the constructor for a new Net::Traceroute object.  If given
@@ -769,6 +823,9 @@ You can pass traceroute6 to do IPv6 traceroutes.
 
 B<no_fragment> - Set the IP don't fragment bit.  Some traceroute
 programs will perform path mtu discovery with this option.
+
+B<use_icmp> - Request that traceroute perform probes with ICMP echo
+packets, rather than UDP.
 
 =head1 METHODS
 
@@ -958,6 +1015,9 @@ Versions prior to 1.04 had some interface issues for subclassing.
 These issues have been addressed, but required a public interface
 change.  If you were relying on the behavior of new to clone existing
 objects, your code needs to be fixed.
+
+There are some suspected issues in how timeout is handled.  I haven't
+had time to address this yet.
 
 =head1 SEE ALSO
 
