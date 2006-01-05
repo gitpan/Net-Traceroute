@@ -264,8 +264,11 @@ sub traceroute ($) {
 	foreach $fh (@ready) {
 	    my $buf;
 	    my $len = $fh->read($buf, 32);
+	    print "Exit 1\n";	
 	    die "read error: $!" unless(defined($len));
+	    print "Exit 2\n";
 	    last out if(!$len);	# EOF
+	    print "Exit 3\n";
 	    $self->_text_accumulator($buf);
 	}
 
@@ -416,7 +419,7 @@ sub _make_pipe ($) {
     if($result->eof) {
   	die "No output from traceroute.  Exec failure?";
     }
-
+    
     $result;
 }
 
@@ -476,23 +479,12 @@ sub _parse ($$) {
     my $self = shift;
     my $tr_output = shift;
 
-    my @list_of_lines = split(/\n/, $tr_output);
-    my $counter = 0;
-    my $max_limit = @list_of_lines; 
-    # find whether timeout is defined 
-    my $total_wait = $self->timeout();
-    my @this_wait = defined($total_wait) ? ($total_wait) : ();
-
     # This is a crufty hand coded parser that does its job well
     # enough.  The approach of regular expressions without state is
     # far from perfect, but it gets the job done.
   line:
     foreach $_ (split(/\n/, $tr_output)) {
-	# dont parse the last line because timeout might have introduced garbage into it 
-	$counter ++;
-	if ($counter == $max_limit  && $total_wait) {
-		last;
-	}
+
 	# Some traceroutes appear to print informational line to stdout,
 	# and we don't care.
 	/^traceroute to / && next;

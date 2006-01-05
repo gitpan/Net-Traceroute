@@ -490,7 +490,7 @@ sub _parse ($$) {
     foreach $_ (split(/\n/, $tr_output)) {
 	# dont parse the last line because timeout might have introduced garbage into it 
 	$counter ++;
-	if ($counter == $max_limit  && $total_wait) {
+	if ($counter == $max_limit) {
 		last;
 	}
 	# Some traceroutes appear to print informational line to stdout,
