@@ -1,3 +1,19 @@
+2007-01-09  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Version number bump.
+	** Add fix for Redhat FC5's newest random patches from Keven Nolish.
+	** Fix for timeout problems:
+	*** Use sysread, not read.
+	*** Remove call to eof immediately after pipe creation -- plays
+	    badly with nonblocking & sysread.  Check performed elsehow.
+
+2006-11-04  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Start towards fixing timeout issues -- mark socket non-blocking
+	   (duh); actually accumulate text rather than smashing the buffer.
+
 2005-07-09  Daniel Hagerty  <hag@linnaean.org>
 
 	* Traceroute.pm:

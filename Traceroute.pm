@@ -19,7 +19,7 @@
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
 #
-# $Id: Traceroute.pm,v 1.22 2005/07/09 20:22:58 hag Exp $
+# $Id: Traceroute.pm,v 1.25 2007/01/10 02:30:13 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -46,9 +46,11 @@ use IO::Pipe;
 use IO::Select;
 use Socket;
 use Symbol qw(qualify_to_ref);
+use Time::HiRes qw(time);
+use Errno qw(EAGAIN EINTR);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.09";		# Version number is only incremented by
+$VERSION = "1.10";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -123,9 +125,6 @@ use constant query_time_offset => 2;
 # Public methods
 
 # Constructor
-
-# XXX Stanley Hopcroft is having issues with timeouts.  Track down his
-# email and produce a test case.
 
 sub new ($;%) {
     my $self = shift;
@@ -246,10 +245,16 @@ sub traceroute ($) {
     # waiting for a timeout if we need to.  Accumulate the text for
     # parsing later in one fell swoop.
 
-    # Note time
-    my $start_time = time();
+    # Note time.  Time::HiRes will give us floating point.
+    my $start_time;
+    my $end_time;
     my $total_wait = $self->timeout();
-    my @this_wait = defined($total_wait) ? ($total_wait) : ();
+    my @this_wait;
+    if(defined($total_wait)) {
+	$start_time = time();
+	push(@this_wait, $total_wait);
+	$end_time = $start_time + $total_wait;
+    }
 
     my $tr_pipe = $self->_make_pipe();
     my $select = new IO::Select($tr_pipe);
@@ -263,28 +268,41 @@ sub traceroute ($) {
 	my $fh;
 	foreach $fh (@ready) {
 	    my $buf;
-	    my $len = $fh->read($buf, 32);
-	    die "read error: $!" unless(defined($len));
+	    my $len = $fh->sysread($buf, 2048);
+
+	    # XXX Linux is fond of returning EAGAIN, which we'll need
+	    # to check for here.  Still true for sysread?
+	    if(!defined($len)) {
+		my $errno = int($!);
+		next out if(($errno == EAGAIN) || ($errno == EINTR));
+		die "read error: $!";
+	    }
 	    last out if(!$len);	# EOF
-	    $self->_text_accumulator($buf);
+
+	    $self->_text_accumulator($self->_text_accumulator() . $buf);
 	}
 
-	# Check for timeout
-	my $now = time();
+	# Adjust select timer if we need to.
 	if(defined($total_wait)) {
-	    if($now > ($start_time + $total_wait)) {
-		$self->stat(TRACEROUTE_TIMEOUT);
-		last out;
-	    }
-	    $this_wait[0] = ($start_time + $total_wait) - $now;
+	    my $now = time();
+	    last out if($now >= $end_time);
+	    $this_wait[0] = $end_time - $now;
 	}
+    }
+    if(defined($total_wait)) {
+	my $now = time();
+	$self->stat(TRACEROUTE_TIMEOUT)	if($now >= $end_time);
     }
 
     $tr_pipe->close();
 
-    # Do the grunt parsing work
-    $self->_parse($self->_text_accumulator());
+    my $accum = $self->_text_accumulator();
+    die "No output from traceroute.  Exec failure?" if($accum eq "");
 
+    # Do the grunt parsing work
+    $self->_parse($accum);
+
+    # XXX are you really sure you want to do it like this??
     if($self->stat() != TRACEROUTE_TIMEOUT) {
 	$self->stat(TRACEROUTE_OK);
     }
@@ -411,11 +429,8 @@ sub _make_pipe ($) {
     open(STDERR, ">& SAVESTDERR");
     close(SAVESTDERR);
 
-    # XXX We're going to assume that an eof right after fork/exec is
-    # actually a failure.  This is quite dubious.
-    if($result->eof) {
-  	die "No output from traceroute.  Exec failure?";
-    }
+    # Long standing bug; the pipe needs to be marked non blocking.
+    $result->blocking(0);
 
     $result;
 }
@@ -476,23 +491,12 @@ sub _parse ($$) {
     my $self = shift;
     my $tr_output = shift;
 
-    my @list_of_lines = split(/\n/, $tr_output);
-    my $counter = 0;
-    my $max_limit = @list_of_lines; 
-    # find whether timeout is defined 
-    my $total_wait = $self->timeout();
-    my @this_wait = defined($total_wait) ? ($total_wait) : ();
-
     # This is a crufty hand coded parser that does its job well
     # enough.  The approach of regular expressions without state is
     # far from perfect, but it gets the job done.
   line:
     foreach $_ (split(/\n/, $tr_output)) {
-	# dont parse the last line because timeout might have introduced garbage into it 
-	$counter ++;
-	if ($counter == $max_limit  && $total_wait) {
-		last;
-	}
+
 	# Some traceroutes appear to print informational line to stdout,
 	# and we don't care.
 	/^traceroute to / && next;
@@ -542,6 +546,11 @@ sub _parse ($$) {
 	    # ipv6 address of a response
 	    /^ ([0-9a-fA-F:]+)/ && do {
 		$addr = $1;
+		$_ = substr($_, length($&));
+		next query;
+	    };
+	    # Redhat FC5 traceroute does this; it's redundant.
+	    /^ \((\d+\.\d+\.\d+\.\d+)\)/ && do {
 		$_ = substr($_, length($&));
 		next query;
 	    };
@@ -628,7 +637,7 @@ sub _text_accumulator ($;$) {
     my $self = shift;
     my $name = "_text_accumulator";
     my $old = $self->{$name};
-    $self->{$name} = $self->{$name}.$_[0] if @_;
+    $self->{$name} = $_[0] if @_;
     return $old;
 }
 
@@ -636,7 +645,7 @@ sub _zero_text_accumulator ($) {
     my $self = shift;
     my $elem = "_text_accumulator";
 
-    delete $self->{$elem};
+    $self->{$elem} = "";
 }
 
 # Hop stuff
