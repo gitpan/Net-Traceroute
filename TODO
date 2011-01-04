@@ -1,6 +1,4 @@
 -*-Outline-*-
 
-* More testing would be good.  I'm generally getting sick of my poor test factoring.
-* I hate the possibly interactive nature of make test.  Think about
-  what to do about it.
 * Normalize icmp_map and regular expressions derived from it.
+* If we're going to pretend v6 support, we need a different icmp_map.

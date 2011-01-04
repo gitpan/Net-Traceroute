@@ -18,8 +18,6 @@
 # Date:		Tue Mar 17 13:44:00 1998
 # Description:  Perl traceroute module for performing traceroute(1)
 #		functionality.
-#
-# $Id: Traceroute.pm,v 1.25 2007/01/10 02:30:13 hag Exp $
 
 # Currently attempts to parse the output of the system traceroute command,
 # which it expects will behave like the standard LBL traceroute program.
@@ -50,7 +48,7 @@ use Time::HiRes qw(time);
 use Errno qw(EAGAIN EINTR);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.10";		# Version number is only incremented by
+$VERSION = "1.11";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -102,6 +100,7 @@ my @public_instance_vars =
        queries
        query_timeout
        source_address
+       text
        trace_program
        timeout
        no_fragment
@@ -184,6 +183,8 @@ sub init {
 
     if(defined($self->host)) {
 	$self->traceroute;
+    } elsif(defined($self->text)) {
+	$self->_parse($self->text)
     }
 
     $self->debug_print(9, Dumper($self));
@@ -221,6 +222,8 @@ sub clone ($;%) {
 
     if(defined($clone->host)) {
 	$clone->traceroute;
+    } elsif(defined($clone->text)) {
+	$clone->_parse($clone->text)
     }
 
     $clone->debug_print(9, Dumper($clone));
@@ -279,7 +282,7 @@ sub traceroute ($) {
 	    }
 	    last out if(!$len);	# EOF
 
-	    $self->_text_accumulator($self->_text_accumulator() . $buf);
+	    $self->text($self->text() . $buf);
 	}
 
 	# Adjust select timer if we need to.
@@ -292,11 +295,17 @@ sub traceroute ($) {
     if(defined($total_wait)) {
 	my $now = time();
 	$self->stat(TRACEROUTE_TIMEOUT)	if($now >= $end_time);
+
+	# This is exceedingly dubious.  Crawl into IO::Pipe::End's
+	# innards, and nuke the pid connected to our pipe.  Otherwise,
+	# close will call waitpid, which we certainly don't wait for a
+	# timeout.
+	delete ${*$tr_pipe}{io_pipe_pid};
     }
 
     $tr_pipe->close();
 
-    my $accum = $self->_text_accumulator();
+    my $accum = $self->text();
     die "No output from traceroute.  Exec failure?" if($accum eq "");
 
     # Do the grunt parsing work
@@ -308,6 +317,12 @@ sub traceroute ($) {
     }
 
     $self;
+}
+
+sub parse {
+    my $self = shift;
+
+    $self->_parse($self->text());
 }
 
 ##
@@ -543,8 +558,8 @@ sub _parse ($$) {
 		$_ = substr($_, length($&));
 		next query;
 	    };
-	    # ipv6 address of a response
-	    /^ ([0-9a-fA-F:]+)/ && do {
+	    # ipv6 address of a response.  This regexp is sleazy.
+	    /^ ([0-9a-fA-F:]*:[0-9a-fA-F]*(?:\.\d+\.\d+\.\d+)?)/ && do {
 		$addr = $1;
 		$_ = substr($_, length($&));
 		next query;
@@ -632,18 +647,9 @@ sub _parse ($$) {
     }
 }
 
-# I don't understand why this one won't work with the accessor generator.
-sub _text_accumulator ($;$) {
-    my $self = shift;
-    my $name = "_text_accumulator";
-    my $old = $self->{$name};
-    $self->{$name} = $_[0] if @_;
-    return $old;
-}
-
 sub _zero_text_accumulator ($) {
     my $self = shift;
-    my $elem = "_text_accumulator";
+    my $elem = "text";
 
     $self->{$elem} = "";
 }
@@ -739,7 +745,7 @@ Net::Traceroute - traceroute(1) functionality in perl
 =head1 SYNOPSIS
 
     use Net::Traceroute;
-    $tr = Net::Traceroute->new(host=> "life.ai.mit.edu");
+    $tr = Net::Traceroute->new(host => "life.ai.mit.edu");
     if($tr->found) {
 	my $hops = $tr->hops;
 	if($hops > 1) {
@@ -753,14 +759,17 @@ Net::Traceroute - traceroute(1) functionality in perl
 This module implements traceroute(1) functionality for perl5.  It
 allows you to trace the path IP packets take to a destination.  It is
 currently implemented as a parser around the system traceroute
-command.
+command.  It has two basic modes of operation, one, where it will run
+traceroute for you, and the other where you provide text from
+previously runing traceroute to parse.
 
 =head1 OVERVIEW
 
 A new Net::Traceroute object must be created with the I<new> method.
 Depending on exactly how the constructor is invoked, it may perform
-the traceroute immediately, or it may return a "template" object that
-can be used to set parameters for several subsequent traceroutes.
+some tracing and/or parsing actions immediately, or it may return a
+"template" object that can be used to set parameters for several
+subsequent traceroutes.
 
 Methods are available for accessing information about a given
 traceroute attempt.  There are also methods that view/modify the
@@ -776,6 +785,7 @@ TIME_EXCEEDED messages.
 				[debug		=> $debuglvl,]
 				[max_ttl	=> $max_ttl,]
 				[host		=> $host,]
+				[text		=> $text,]
 				[queries	=> $queries,]
 				[query_timeout	=> $query_timeout,]
 				[timeout	=> $timeout,]
@@ -787,13 +797,14 @@ TIME_EXCEEDED messages.
     $frob = $obj->clone([options]);
 
 This is the constructor for a new Net::Traceroute object.  If given
-C<host>, it will actually perform the traceroute.  You can call the
-traceroute method later.
+C<host>, it will immediately perform the traceroute.  If given C<text>,
+it will parse that text as traceroute output.
 
 Given an existing Net::Traceroute object $obj as a template, you can
 call $obj->clone() with the usual constructor parameters.  The same
 rules apply about defining host; that is, traceroute will be run if it
-is defined.  You can always pass host => undef to clone.
+is defined, or text will be parsed.  You can always pass
+C<host => undef, text => undef> to clone.
 
 Possible options are:
 
@@ -801,6 +812,9 @@ B<host> - A host to traceroute to.  If you don't set this, you get a
 Traceroute object with no traceroute data in it.  The module always
 uses IP addresses internally and will attempt to lookup host names via
 inet_aton.
+
+B<text> - Output from a previously run traceroute.  If set, and host
+isn't, the given text will be parsed.
 
 B<base_port> - Base port number to use for the UDP queries.
 Traceroute assumes that nothing is listening to port C<base_port> to
@@ -853,6 +867,11 @@ packets, rather than UDP.
 Run system traceroute, and parse the results.  Will fill in the rest
 of the object for informational queries.
 
+=item parse
+
+Parse the previously provided C<text>, filling in the rest of the
+object for queries.
+
 =back
 
 =head2 Controlling traceroute invocation
@@ -879,6 +898,8 @@ aren't documented here.
 =item query_timeout([TIMEOUT])
 
 =item host([HOST])
+
+=item text([TEXT])
 
 =item timeout([TIMEOUT])
 

@@ -1,21 +1,16 @@
-This is version 1.05 of Net::Traceroute.  Users upgrading from
-previous versions, please note that there has been an interface
-change.  Your program may not work.  Please see "CLONING SUPPORT
-BEFORE 1.04" in the pod documentation.
+This is version 1.11 of Net::Traceroute.  Users upgrading from before
+version 1.04, please note that there has been an interface change.
+Your program may not work.  Please see "CLONING SUPPORT BEFORE 1.04"
+in the pod documentation.
+
+New with this version includes support for parsing traceroute text (as
+opposed to having to run traceroute itself), some ipv6 bug fixes, and
+a completely reworked test suite.
 
 Net::Traceroute is available from CPAN and my home
 page.  My CPAN area is authors/id/H/HA/HAG, and my home page is
 currently http://www.linnaean.org/~hag/ .  I hope you find the
 module useful.
-
-Changes from previous version includes bug fixes, traceroute6 support
-(thanks to Mohacsi Janos <mohacsi@ik.bme.hu>), better subclassing
-support, and new traceroute options.
-
-
-This traceroute module works by parsing your vendor's traceroute
-command.  As such, some systems may not work; Windows is known not to.
-Patches to support your favorite OS are welcome.
 
 Daniel Hagerty
 hag@linnaean.org
@@ -23,7 +18,7 @@ hag@linnaean.org
 Example:
 
 use Net::Traceroute;
-$tr = Net::Traceroute->new(host=>"life.ai.mit.edu");
+$tr = Net::Traceroute->new(host => "life.ai.mit.edu");
 
 if($tr->found) {
     my $hops = $tr->hops;

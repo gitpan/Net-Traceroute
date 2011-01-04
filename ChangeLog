@@ -1,3 +1,56 @@
+2011-01-02  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Bump version number for release.
+
+2010-12-31  Daniel Hagerty  <hag@linnaean.org>
+
+	* t/95-sys-traceroute.t:
+	** New file: Recreate our original test.pl's most useful test.
+
+2010-12-29  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Prevent waitpid() on pipe close.
+	* t/waitroute:
+	** Unbuffer output.
+	* t/80-tracelie.t, t/81-timeout.t:
+	** Explicitly use "." in paths to test helper programs.
+	* t/81-timeout.t:
+	** Unmark TODO test; fixed by above.
+	* Makefile.PL:
+	** Re-enable installing on windows.
+
+2010-12-13  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Use a better (but still sleazy) IPv6 regexp.
+	* t/60-parse-6wierd.t
+	** Actually parse the traceroute.
+	** Remove TODO markers.
+	** Fix bug in data from hand editing.
+
+2010-12-12  Daniel Hagerty  <hag@linnaean.org>
+
+	* t/*.t:
+	** New testing code.
+	* t/testlib.pl:
+	** Shared code for *.t files.
+	* t/tracelie:
+	** Provides a static traceroute for a fixture.
+	* t/waitroute:
+	** Provides a static traceroute and causes a timeout
+	   for another fixture.
+	* test.pl:
+	** Removed; superseded by new test code.
+
+2010-10-31  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Rename some text_accumulator related names,
+	   exposing it to the user.
+	** Document how the text interface works.
+
 2007-01-09  Daniel Hagerty  <hag@linnaean.org>
 
 	* Traceroute.pm:

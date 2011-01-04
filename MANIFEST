@@ -1,9 +1,22 @@
 ChangeLog
-MANIFEST
-MANIFEST.SKIP
 Makefile.PL
+MANIFEST			This list of files
+MANIFEST.SKIP
 README
+t/00-basics.t
+t/05-backend.t
+t/07-subclassing.t
+t/20-parse-4basic.t
+t/21-parse-4timeouts.t
+t/22-parse-4ecmp.t
+t/23-parse-4flags.t
+t/50-parse-6basic.t
+t/60-parse-6wierd.t
+t/80-tracelie.t
+t/81-timeout.t
+t/testlib.pl
+t/tracelie
+t/waitroute
 TODO
 Traceroute.pm
-test.pl
 META.yml                                 Module meta-data (added by MakeMaker)
