@@ -8,8 +8,12 @@
 use strict;
 use warnings;
 
-use Test::More tests => 3;
+use Test::More;
 use Net::Traceroute;
+require "t/testlib.pl";
+
+os_must_unixexec();
+plan tests => 3;
 
 my $tr = Net::Traceroute->new(
    trace_program => "./t/tracelie",

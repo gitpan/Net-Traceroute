@@ -14,6 +14,7 @@ t/50-parse-6basic.t
 t/60-parse-6wierd.t
 t/80-tracelie.t
 t/81-timeout.t
+t/95-sys-traceroute.t
 t/testlib.pl
 t/tracelie
 t/waitroute

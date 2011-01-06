@@ -27,4 +27,13 @@ sub parsefh {
     parsetext($text);
 }
 
+# os_must_unixexec() - test requires the OS has a unix style exec.
+# Test must use Test::More::plan().
+sub os_must_unixexec {
+    my @oses = qw(MSWin32 cygwin);
+    my %oses = map { $_ => 1, } @oses;
+    plan skip_all => "OS unsupported"
+	if(exists($oses{$^O}));
+}
+
 1;

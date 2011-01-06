@@ -48,7 +48,7 @@ use Time::HiRes qw(time);
 use Errno qw(EAGAIN EINTR);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.11";		# Version number is only incremented by
+$VERSION = "1.12";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);

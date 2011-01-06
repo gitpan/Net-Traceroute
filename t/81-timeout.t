@@ -6,9 +6,13 @@
 use strict;
 use warnings;
 
-use Test::More tests => 2;
+use Test::More;
 use Net::Traceroute;
 use Time::HiRes qw(time);
+require "t/testlib.pl";
+
+os_must_unixexec();
+plan tests => 2;
 
 my $start = time();
 
