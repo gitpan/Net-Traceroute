@@ -17,6 +17,35 @@ use Sys::Hostname;
 require "t/testlib.pl";
 
 os_must_unixexec();
+
+####
+
+# Probe PATH, plus some well known locations, for a traceroute
+# program.  skip_all this test if we can't find one.
+
+my @path = split(":", $ENV{PATH});
+my $has_traceroute;
+foreach my $component (@path) {
+    if(-x "$component/traceroute") {
+	$has_traceroute = 1;
+	last;
+    }
+}
+
+if(!defined($has_traceroute)) {
+    # Check for traceroute in /usr/sbin or /sbin.  The check is
+    # redundant if PATH already contains one of them, but it won't hurt.
+    foreach my $component ("/usr/sbin", "/sbin") {
+	if(-x "$component/traceroute") {
+	    $ENV{PATH} .= join(":", @path, $component);
+	    goto runtest;
+	}
+    }
+
+    plan skip_all => "Cannot find a traceroute executable";
+}
+
+runtest:
 plan tests => 2;
 
 ####
@@ -29,15 +58,11 @@ my $name = hostname();
 # where there is no traceroute in path (especially automated testers).
 
 my $tr1 = eval { Net::Traceroute->new(host => $name, timeout => 30) };
-
-# I haven't figured out how yet, but there are ways the error message
-# can be: Cannot exec: No such file or directory
-# in some circumstances.  Not chasing it yet..
-if($@ && $@ !~ /No output from traceroute.  Exec failure/) {
-    die;
-} else {
-    $ENV{PATH} .= ":/usr/sbin:/sbin";
-    $tr1 = Net::Traceroute->new(host => $name, timeout => 30);
+if($@) {
+    die unless(exists($ENV{AUTOMATED_TESTING}));
+    # If we're in an automated tester, rerun with debug => 9 so we get
+    # a better clue of what's going wrong.
+    $tr1 = Net::Traceroute->new(host => $name, timeout => 30, debug => 9);
 }
 
 my $packed_addr = inet_aton($name);

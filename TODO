@@ -1,4 +1,6 @@
 -*-Outline-*-
 
-* Normalize icmp_map and regular expressions derived from it.
-* If we're going to pretend v6 support, we need a different icmp_map.
+* Retain ASN, MPLS data.
+* Retain DNS names.
+* See if more modern perl idioms do what we want in the case of
+  pipe/fork/exec producing ENOENT from exec.

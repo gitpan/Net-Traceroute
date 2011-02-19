@@ -1,3 +1,51 @@
+2011-02-19  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Integrate cisco IOS support:
+	*** Add a few status codes.
+	*** Keep track of which chunk of traceroute input was most
+	    recently seen for parsing purposes.
+	*** Lots of regexp tweaks.
+	*** Doc changes.
+	** Random documentation updates.
+	** Use anonymous filehanles when suitable.
+	** Bump to version 1.13 for release.
+	* t/4*.t:
+	** New cisco tests.
+
+2011-02-18  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Improve some error messages.
+	** Cleanup mess from icmp_map doing v4 and v6 together.
+
+2011-02-16  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Convert operations involving $& to s//.
+	   $& is considered harmful.
+	** Select the translation between !A-type icmp flags based on what
+	   we're parsing, rather than assuming all is LBL ipv4.
+	* t/33-parse-6flags.t
+	** Unmark TODO tests; they pass now thanks to above.
+
+2011-02-06  Daniel Hagerty  <hag@linnaean.org>
+
+	* t/21-parse-4timeouts.t:
+	** More test cases, especially targetting an issue seen on cisco
+	   development branch.
+	* t/33-parse-6flags.t
+	** New test.
+
+2011-02-05  Daniel Hagerty  <hag@linnaean.org>
+
+	* t/95-sys-traceroute.t:
+	** Specifically search for a traceroute executable on the system.
+	   If we can't find one, skip the test in an obvious way.
+	* Renamed:
+	** t/50-parse-6basic.t -> t/30-parse-6basic.t
+	** t/60-parse-6wierd.t -> t/34-parse-6wierd.t
+
 2011-01-02  Daniel Hagerty  <hag@linnaean.org>
 
 	* Traceroute.pm:

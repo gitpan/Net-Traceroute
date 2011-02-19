@@ -48,7 +48,7 @@ use Time::HiRes qw(time);
 use Errno qw(EAGAIN EINTR);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.12";		# Version number is only incremented by
+$VERSION = "1.13";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -65,6 +65,9 @@ $VERSION = "1.12";		# Version number is only incremented by
 	     TRACEROUTE_UNREACH_SRCFAIL
 	     TRACEROUTE_UNREACH_FILTER_PROHIB
 	     TRACEROUTE_UNREACH_ADDR
+	     TRACEROUTE_UNREACH_PORT
+	     TRACEROUTE_SOURCE_QUENCH
+	     TRACEROUTE_INTERRUPTED
 	     );
 
 ###
@@ -85,6 +88,9 @@ sub TRACEROUTE_UNREACH_NEEDFRAG { 7 }
 sub TRACEROUTE_UNREACH_SRCFAIL { 8 }
 sub TRACEROUTE_UNREACH_FILTER_PROHIB { 9 }
 sub TRACEROUTE_UNREACH_ADDR { 10 }
+sub TRACEROUTE_UNREACH_PORT { 11 }
+sub TRACEROUTE_SOURCE_QUENCH { 12 }
+sub TRACEROUTE_INTERRUPTED { 13 }
 
 ## Internal data used throughout the module
 
@@ -119,6 +125,49 @@ my @simple_instance_vars = (
 use constant query_stat_offset => 0;
 use constant query_host_offset => 1;
 use constant query_time_offset => 2;
+
+# We keep track of the most recently seen chunk of the traceroute for
+# parsing purposes.
+use constant token_addr => 0;
+use constant token_time => 1;
+use constant token_flag => 2;
+
+# Map !<Mumble> notation traceroute uses for various icmp packet types
+# it may receive.
+my %icmp_map_v4 = (
+     N => TRACEROUTE_UNREACH_NET,
+     H => TRACEROUTE_UNREACH_HOST,
+     P => TRACEROUTE_UNREACH_PROTO,
+     F => TRACEROUTE_UNREACH_NEEDFRAG,
+     S => TRACEROUTE_UNREACH_SRCFAIL,
+     X => TRACEROUTE_UNREACH_FILTER_PROHIB,
+     '!' => TRACEROUTE_BSDBUG,
+		   );
+
+my %icmp_map_v6 = (
+     N => TRACEROUTE_UNREACH_NET,
+     P => TRACEROUTE_UNREACH_FILTER_PROHIB,
+     # Unlikely to be seen in the wild:
+     # S => unreach notneighbor,
+     A => TRACEROUTE_UNREACH_ADDR,
+     '!' => TRACEROUTE_UNREACH_PORT,
+		   );
+
+# Entries Q, I, T, and U have never been tested.  For the most part, I
+# don't know how to produce them or they're so rare I couldn't be
+# bothered.
+my %icmp_map_cisco = (
+     A => TRACEROUTE_UNREACH_FILTER_PROHIB,
+     Q => TRACEROUTE_SOURCE_QUENCH,
+     I => TRACEROUTE_INTERRUPTED,
+     U => TRACEROUTE_UNREACH_PORT,
+     H => TRACEROUTE_UNREACH_HOST,
+     N => TRACEROUTE_UNREACH_NET,
+     P => TRACEROUTE_UNREACH_PROTO,
+     T => TRACEROUTE_TIMEOUT,
+     # Handled elsehow:
+     # ? => unknown packet type,
+		      );
 
 ###
 # Public methods
@@ -429,9 +478,8 @@ sub _make_pipe ($) {
     push(@tr_args, @plen);
 
     # XXX we probably shouldn't throw stderr away.
-    # XXX we probably shouldn't use named filehandles.
-    open(SAVESTDERR, ">&STDERR");
-    open(STDERR, ">/dev/null");
+    open(my $savestderr, ">&", STDERR);
+    open(STDERR, ">", "/dev/null");
 
     my $pipe = new IO::Pipe;
 
@@ -441,8 +489,8 @@ sub _make_pipe ($) {
     # the library doesn't help us.
     my $result = $pipe->reader(@tr_args);
 
-    open(STDERR, ">& SAVESTDERR");
-    close(SAVESTDERR);
+    open(STDERR, ">&", $savestderr);
+    close($savestderr);
 
     # Long standing bug; the pipe needs to be marked non blocking.
     $result->blocking(0);
@@ -491,20 +539,21 @@ sub _tr_cmd_args ($) {
     @result;
 }
 
-# Map !<Mumble> notation traceroute uses for various icmp packet types
-# it may receive.
-my %icmp_map = (N => TRACEROUTE_UNREACH_NET,
-		H => TRACEROUTE_UNREACH_HOST,
-		P => TRACEROUTE_UNREACH_PROTO,
-		F => TRACEROUTE_UNREACH_NEEDFRAG,
-		S => TRACEROUTE_UNREACH_SRCFAIL,
-		A => TRACEROUTE_UNREACH_ADDR,
-		X => TRACEROUTE_UNREACH_FILTER_PROHIB);
-
 # Do the grunt work of parsing the output.
 sub _parse ($$) {
     my $self = shift;
     my $tr_output = shift;
+
+    my $hopno;
+    my $query;
+
+    my $icmp_map;
+    my $icmp_map_re;
+
+    my $set_icmp_map = sub {
+	$icmp_map = shift if(!defined($icmp_map));;
+	$icmp_map_re = join("", keys(%{$icmp_map}));
+    };
 
     # This is a crufty hand coded parser that does its job well
     # enough.  The approach of regular expressions without state is
@@ -539,53 +588,79 @@ sub _parse ($$) {
 	# possibilities.
 	/^\s+MPLS Label=(\d+) CoS=(\d) TTL=(\d+) S=(\d+)/ && next;
 
+	# Cisco chatter.  We use the "Type escape sequence..." line to
+	# set the icmp_map to cisco.
+	/^Type escape sequence to abort/ && do {
+	    &{$set_icmp_map}(\%icmp_map_cisco);
+	    next;
+	};
+	/^Tracing the route to/ && next;
+
+	# XXX there's one like this in the query loop, too.
+	# Can we eliminate one?
+	/^$/ && next;
+
+	# Cisco marks ECMP paths very differently from LBL.  LBL
+	# outputs the changing addresses in one line, whereas cisco
+	# will output a line with no hop count.
+	# XXX we probably need to possibly match DNS in here.
+	s/^\s{4}(\d+\.\d+\.\d+\.\d+ )/$1/ && goto query;
+	s/^\s{4}([0-9a-fA-F:]*:[0-9a-fA-F]*(?:\.\d+\.\d+\.\d+)?)/$1/ &&
+	    goto query;
+
 	# Each line starts with the hopno (space padded to two characters)
 	# and a space.
-	/^([0-9 ][0-9]) / || die "Unable to traceroute output: $_";
-	my $hopno = $1 + 0;
+	s/^ ?([0-9 ][0-9]) // || die "Can't find hop number in output: $_";
 
-	my $query = 1;
+	$hopno = $1 + 0;
+	$query = 1;
+
 	my $addr;
 	my $time;
 
-	$_ = substr($_,length($&));
+	my $last_token;
 
       query:
 	while($_) {
+	    # dns name and address; rewrite as just an address
+	    # XXX should keep dns name
+	    s/^[-A-Za-z0-9.]+ \((\d+\.\d+\.\d+\.\d+)\)/$1/;
+	    s/^[-A-Za-z0-9.]+ \(([0-9a-fA-F:]*:[0-9a-fA-F]*(?:\.\d+\.\d+\.\d+)?)\)/$1/;
+
 	    # ip address of a response
-	    /^ (\d+\.\d+\.\d+\.\d+)/ && do {
+	    s/^ ?(\d+\.\d+\.\d+\.\d+)// && do {
+		$last_token = token_addr;
 		$addr = $1;
-		$_ = substr($_, length($&));
+		&{$set_icmp_map}(\%icmp_map_v4);
 		next query;
 	    };
 	    # ipv6 address of a response.  This regexp is sleazy.
-	    /^ ([0-9a-fA-F:]*:[0-9a-fA-F]*(?:\.\d+\.\d+\.\d+)?)/ && do {
+	    s/^ ?([0-9a-fA-F:]*:[0-9a-fA-F]*(?:\.\d+\.\d+\.\d+)?)// && do {
+		$last_token = token_addr;
 		$addr = $1;
-		$_ = substr($_, length($&));
+		&{$set_icmp_map}(\%icmp_map_v6);
 		next query;
 	    };
 	    # Redhat FC5 traceroute does this; it's redundant.
-	    /^ \((\d+\.\d+\.\d+\.\d+)\)/ && do {
-		$_ = substr($_, length($&));
-		next query;
-	    };
+	    s/^ \((\d+\.\d+\.\d+\.\d+)\)// && next query;
+
 	    # round trip time of query
-	    /^   ?([0-9.]+) ms/ && do {
+	    s/^  ? ?([0-9.]+) ms(?:ec)?// && do {
+		$last_token = token_time;
 		$time = $1 + 0;
 
 		$self->_add_hop_query($hopno, $query,
 				     TRACEROUTE_OK, $addr, $time);
 		$query++;
-		$_ = substr($_, length($&));
 		next query;
 	    };
 	    # query timed out
-	    /^ +\*/ && do {
+	    s/^ +\*// && do {
+		$last_token = token_time;
 		$self->_add_hop_query($hopno, $query,
 				     TRACEROUTE_TIMEOUT,
 				     inet_ntoa(INADDR_NONE), 0);
 		$query++;
-		$_ = substr($_, length($&));
 		next query;
 	    };
 
@@ -604,43 +679,57 @@ sub _parse ($$) {
 	    # of icmp map, and finally whitespace or end of string
 	    # indicate a lone "!".
 
-	    /^ (!<\d+>|![NHPFSAX]?)/ && do {
+	    s/^ (!<\d+>|\?|![$icmp_map_re]?) ?// && do {
 		my $flag = $1;
-		my $matchlen = length($&);
 
-		# Flip the counter back one;  this flag only appears
-		# optionally and by now we've already incremented the
-		# query counter.
-		my $query = $query - 1;
+		# If the prior token was a time sample, it incremented
+		# query.  Undo that locally.
+		my $lquery = $query;
+		$lquery-- if(defined($last_token) && $last_token == token_time);
 
+		my $stat;
 		if($flag =~ /^!<\d>$/) {
-		    $self->_change_hop_query_stat($hopno, $query,
-						 TRACEROUTE_UNKNOWN);
+		    $stat = TRACEROUTE_UNKNOWN;
 		} elsif($flag =~ /^!$/) {
-		    $self->_change_hop_query_stat($hopno, $query,
-						 TRACEROUTE_BSDBUG);
-		} elsif($flag =~ /^!([NHPFSAX])$/) {
+		    $stat = $icmp_map->{"!"};
+		} elsif($flag =~ /^!([$icmp_map_re])$/) {
 		    my $icmp = $1;
 
 		    # Shouldn't happen
-		    die "Unable to traceroute output (flag $icmp)!"
-			unless(defined($icmp_map{$icmp}));
+		    die "Unable to parse traceroute output (flag $icmp)!"
+			unless(defined($icmp_map->{$icmp}));
 
-		    $self->_change_hop_query_stat($hopno, $query,
-						 $icmp_map{$icmp});
+		    $stat = $icmp_map->{$icmp};
+		} elsif($flag eq "?") {
+		    # Cisco does this.
+		    $stat = TRACEROUTE_UNKNOWN;
+		} else {
+		    die "unrecognized flag: $flag";
 		}
-		$_ = substr($_, $matchlen);
+
+		if(defined($last_token) && ($last_token == token_time)) {
+		    $self->_change_hop_query_stat($hopno, $lquery, $stat);
+		} else {
+		    $self->_add_hop_query($hopno, $lquery, $stat, $addr, 0);
+		    $query++;
+		}
+		$last_token = token_flag;
+
 		next query;
 	    };
+
 	    # Nothing left, next line.
-	    /^$/ && do {
-		next line;
-	    };
+	    /^$/ && next line;
+
+	    # Cisco ASN data.
+	    # XXX we should keep this.
+	    s/^ \[AS \d+\]// && next query;
+
+	    s/ \[MPLS: Label \d+ Exp \d+\]// && next query;
+	    s, \[MPLS: Labels \d+(?:/\d+)* Exp \d+\],, && next query;
+
 	    # Some LBL derived traceroutes print ttl stuff
-	    /^ \(ttl ?= ?\d+!\)/ && do {
-		$_ = substr($_, length($&));
-		next query;
-	    };
+	    s/^ \(ttl ?= ?\d+!\)// && next query;
 
 	    die "Unable to parse traceroute output: $_";
 	}
@@ -756,10 +845,13 @@ Net::Traceroute - traceroute(1) functionality in perl
 
 =head1 DESCRIPTION
 
-This module implements traceroute(1) functionality for perl5.  It
-allows you to trace the path IP packets take to a destination.  It is
-currently implemented as a parser around the system traceroute
-command.  It has two basic modes of operation, one, where it will run
+This module implements a parser for various traceroute
+implementations.  At present, it can parse most LBL traceroute
+derivatives used on typical unixes, and the traceroute of cisco IOS.
+Traceroutes known not to be supported include that of Microsoft
+Windows and HP-UX.
+
+This module has two basic modes of operation, one, where it will run
 traceroute for you, and the other where you provide text from
 previously runing traceroute to parse.
 
@@ -933,7 +1025,8 @@ actually reachable.
 
 =item found
 
-Returns 1 if the host was found, undef otherwise.
+Attempt to return 1 if the host was found, undef otherwise.  This test
+is a poor heuristic, and will frequently give wrong answers.
 
 =item pathmtu
 
@@ -985,6 +1078,15 @@ This hop returned an ICMP Host Unreachable.
 
 This hop returned an ICMP Protocol unreachable.
 
+=item TRACEROUTE_UNREACH_PORT
+
+Use in cisco and traceroute6 parsing.  In cisco, "!U", in traceroute6,
+a "!".
+
+=item TRACEROUTE_UNREACH_ADDR
+
+This hop returned an ICMP6 address unreachable.
+
 =item TRACEROUTE_UNREACH_NEEDFRAG
 
 Indicates that you can't reach this host without fragmenting your
@@ -1003,6 +1105,16 @@ disallowed by administrative action.  Suspect sheer, raving paranoia.
 
 The destination machine appears to exhibit the 4.[23]BSD time exceeded
 bug.
+
+=item TRACEROUTE_SOURCE_QUENCH
+
+Some machine has generated an ICMP Source Quench message, asking you
+to slow down.
+
+=item TRACEROUTE_INTERRUPTED
+
+"User interrupted test".  Cisco's traceroute does this.  Its unclear
+how to produce it.
 
 =back
 
@@ -1053,9 +1165,6 @@ Versions prior to 1.04 had some interface issues for subclassing.
 These issues have been addressed, but required a public interface
 change.  If you were relying on the behavior of new to clone existing
 objects, your code needs to be fixed.
-
-There are some suspected issues in how timeout is handled.  I haven't
-had time to address this yet.
 
 =head1 SEE ALSO
 
