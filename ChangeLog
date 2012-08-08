@@ -1,3 +1,17 @@
+2012-08-08  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Bump to version 1.14 for release.
+
+2012-08-04  Daniel Hagerty  <hag@linnaean.org>
+
+	* Traceroute.pm:
+	** Integrate patches from Gerald HERMANT <ghermant@astrel.fr>:
+	*** Pass -t, -T to traceroute via tos, use_tcp (respectively)
+	    options.
+	*** argv: new public routine, capturing traceroute argument
+	    calculation.
+
 2011-02-19  Daniel Hagerty  <hag@linnaean.org>
 
 	* Traceroute.pm:

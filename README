@@ -1,10 +1,9 @@
-This is version 1.13 of Net::Traceroute.  Users upgrading from before
+This is version 1.14 of Net::Traceroute.  Users upgrading from before
 version 1.04, please note that there has been an interface change.
 Your program may not work.  Please see "CLONING SUPPORT BEFORE 1.04"
 in the pod documentation.
 
-New with this version includes support for parsing cisco IOS
-traceroutes, and tests for the same.
+This release adds support for a few flags in newer traceroutes.
 
 Net::Traceroute is available from CPAN and my home
 page.  My CPAN area is authors/id/H/HA/HAG, and my home page is

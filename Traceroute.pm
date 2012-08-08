@@ -48,7 +48,7 @@ use Time::HiRes qw(time);
 use Errno qw(EAGAIN EINTR);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.13";		# Version number is only incremented by
+$VERSION = "1.14";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -111,6 +111,8 @@ my @public_instance_vars =
        timeout
        no_fragment
        use_icmp
+       use_tcp
+       tos
        );
 
 my @simple_instance_vars = (
@@ -374,6 +376,19 @@ sub parse {
     $self->_parse($self->text());
 }
 
+sub argv {
+    my $self = shift;
+
+    my @tr_args;
+    push(@tr_args, $self->trace_program());
+    push(@tr_args, $self->_tr_cmd_args());
+    push(@tr_args, $self->host());
+    my @plen = ($self->packetlen) || (); # Sigh.
+    push(@tr_args, @plen);
+
+    return(@tr_args);
+}
+
 ##
 # Hop and query functions
 
@@ -469,13 +484,7 @@ foreach my $name (@simple_instance_vars) {
 sub _make_pipe ($) {
     my $self = shift;
 
-    my @tr_args;
-
-    push(@tr_args, $self->trace_program());
-    push(@tr_args, $self->_tr_cmd_args());
-    push(@tr_args, $self->host());
-    my @plen = ($self->packetlen) || (); # Sigh.
-    push(@tr_args, @plen);
+    $self->debug_print(9, Dumper($self));
 
     # XXX we probably shouldn't throw stderr away.
     open(my $savestderr, ">&", STDERR);
@@ -487,7 +496,7 @@ sub _make_pipe ($) {
     # in the child program, but returns a reasonable looking object in
     # the parent.  This is really a standard unix fork/exec issue, but
     # the library doesn't help us.
-    my $result = $pipe->reader(@tr_args);
+    my $result = $pipe->reader($self->argv());
 
     open(STDERR, ">&", $savestderr);
     close($savestderr);
@@ -506,6 +515,7 @@ my %cmdline_valuemap =
       "queries" => "-q",
       "query_timeout" => "-w",
       "source_address" => "-s",
+      "tos" => "-t",
       );
 
 # Map more instance variables to command line arguments that are
@@ -513,6 +523,7 @@ my %cmdline_valuemap =
 my %cmdline_flagmap =
     ( "no_fragment" => "-F",
       "use_icmp" => "-I",
+      "use_tcp" => "-T"
       );
 
 # Build a list of command line arguments
@@ -882,10 +893,13 @@ TIME_EXCEEDED messages.
 				[query_timeout	=> $query_timeout,]
 				[timeout	=> $timeout,]
 				[source_address	=> $srcaddr,]
+				[tos		=> $tos,]
 				[packetlen	=> $packetlen,]
 				[trace_program	=> $program,]
 				[no_fragment	=> $nofrag,]
-				[use_icmp	=> $useicmp,]);
+				[use_icmp	=> $useicmp,]
+				[use_tcp	=> $usetcp,]
+                               );
     $frob = $obj->clone([options]);
 
 This is the constructor for a new Net::Traceroute object.  If given
@@ -938,6 +952,8 @@ by Net::Traceroute, not the underlying traceroute command.
 
 B<source_address> - Select the source address that traceroute wil use.
 
+B<tos> - Specify a ToS value for traceroute to use.
+
 B<packetlen> - Length of packets to use.  Traceroute tries to make the
 IP packet exactly this long.
 
@@ -949,6 +965,8 @@ programs will perform path mtu discovery with this option.
 
 B<use_icmp> - Request that traceroute perform probes with ICMP echo
 packets, rather than UDP.
+
+B<use_tcp> - Request that traceoute perform probes with TCP SYNs.
 
 =head1 METHODS
 
@@ -963,6 +981,11 @@ of the object for informational queries.
 
 Parse the previously provided C<text>, filling in the rest of the
 object for queries.
+
+=item argv
+
+Returns a list of arguments that traceroute will be invoked with.  For
+debugging and/or overriding by subclasses.
 
 =back
 
