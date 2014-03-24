@@ -1,3 +1,9 @@
+2014-03-24  Daniel Hagerty  <hag@linnaean.org>
+	* Traceroute.pm:
+	** Bump to version 1.15 for release.
+	** Fix parsing of names when traceroute has been used w/o -n,
+	reported by Graham Ollis.
+
 2012-08-08  Daniel Hagerty  <hag@linnaean.org>
 
 	* Traceroute.pm:

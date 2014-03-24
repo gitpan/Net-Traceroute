@@ -48,7 +48,7 @@ use Time::HiRes qw(time);
 use Errno qw(EAGAIN EINTR);
 use Data::Dumper;		# Debugging
 
-$VERSION = "1.14";		# Version number is only incremented by
+$VERSION = "1.15";		# Version number is only incremented by
 				# hand.
 
 @ISA = qw(Exporter);
@@ -635,8 +635,8 @@ sub _parse ($$) {
 	while($_) {
 	    # dns name and address; rewrite as just an address
 	    # XXX should keep dns name
-	    s/^[-A-Za-z0-9.]+ \((\d+\.\d+\.\d+\.\d+)\)/$1/;
-	    s/^[-A-Za-z0-9.]+ \(([0-9a-fA-F:]*:[0-9a-fA-F]*(?:\.\d+\.\d+\.\d+)?)\)/$1/;
+	    s/^ ?[-A-Za-z0-9.]+ \((\d+\.\d+\.\d+\.\d+)\)/$1/;
+	    s/^ ?[-A-Za-z0-9.]+ \(([0-9a-fA-F:]*:[0-9a-fA-F]*(?:\.\d+\.\d+\.\d+)?)\)/$1/;
 
 	    # ip address of a response
 	    s/^ ?(\d+\.\d+\.\d+\.\d+)// && do {
